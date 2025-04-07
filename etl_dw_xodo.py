@@ -1,4 +1,3 @@
-
 import pyodbc
 import pandas as pd
 
@@ -7,15 +6,40 @@ conn_erp = pyodbc.connect("DSN=xodo")
 conn_dw = pyodbc.connect("DSN=dw_xodo")
 cursor_dw = conn_dw.cursor()
 
-print("✅ Conectado ao ERP e DW")
+print("\u2705 Conectado ao ERP e DW")
 
-# Função auxiliar
-def truncate_and_insert(df, table_name, insert_query):
-    cursor_dw.execute(f"DELETE FROM {table_name}")  # Substitui TRUNCATE por DELETE
+# Função auxiliar com UPDATE + INSERT para dimensões
+def upsert_table_com_update(df, table_name, insert_query, pk_column, compare_columns):
+    df = df.fillna("")
+    cursor_dw.execute(f"SELECT * FROM {table_name}")
+    columns = [column[0] for column in cursor_dw.description]
+    existing_rows = cursor_dw.fetchall()
+
+    existing_dict = {
+        row[columns.index(pk_column)]: dict(zip(columns, row))
+        for row in existing_rows
+    }
+
+    updated, inserted = 0, 0
     for _, row in df.iterrows():
-        cursor_dw.execute(insert_query, tuple(row))
+        pk_value = row[pk_column]
+        if pk_value in existing_dict:
+            has_changes = any(
+                str(row[col]) != str(existing_dict[pk_value].get(col, ""))
+                for col in compare_columns
+            )
+            if has_changes:
+                set_clause = ", ".join([f"{col} = ?" for col in compare_columns])
+                update_query = f"UPDATE {table_name} SET {set_clause} WHERE {pk_column} = ?"
+                update_values = [row[col] for col in compare_columns] + [pk_value]
+                cursor_dw.execute(update_query, update_values)
+                updated += 1
+        else:
+            cursor_dw.execute(insert_query, tuple(row[col] for col in [pk_column] + compare_columns))
+            inserted += 1
+
     conn_dw.commit()
-    print(f"✅ {len(df)} registros inseridos em {table_name}")
+    print(f"✅ {inserted} inseridos e {updated} atualizados em {table_name}")
 
 # ---------------------------
 # DIMENSÕES
@@ -24,12 +48,12 @@ def truncate_and_insert(df, table_name, insert_query):
 def load_dim_filial():
     df = pd.read_sql("SELECT DISTINCT fil_codigo FROM filial", conn_erp)
     insert_q = "INSERT INTO dim_filial (fil_codigo) VALUES (?)"
-    truncate_and_insert(df, "dim_filial", insert_q)
+    upsert_table_com_update(df, "dim_filial", insert_q, "fil_codigo", [])
 
 def load_dim_atividade():
     df = pd.read_sql("SELECT DISTINCT atv_codigo, atv_desc FROM atividade", conn_erp)
     insert_q = "INSERT INTO dim_atividade (atv_codigo, atv_desc) VALUES (?, ?)"
-    truncate_and_insert(df, "dim_atividade", insert_q)
+    upsert_table_com_update(df, "dim_atividade", insert_q, "atv_codigo", ["atv_desc"])
 
 def load_dim_pessoa():
     query = """
@@ -42,22 +66,20 @@ def load_dim_pessoa():
         INSERT INTO dim_pessoa (pes_codigo, pes_razao, pes_fantasia, pes_atvcodigo, pes_ativo)
         VALUES (?, ?, ?, ?, ?)
     """
-    truncate_and_insert(df, "dim_pessoa", insert_q)
+    upsert_table_com_update(df, "dim_pessoa", insert_q, "pes_codigo",
+                            ["pes_razao", "pes_fantasia", "pes_atvcodigo", "pes_ativo"])
 
 def load_dim_colaborador():
     df = pd.read_sql("SELECT clb_codigo, clb_razao FROM colaborador", conn_erp)
     insert_q = "INSERT INTO dim_colaborador (clb_codigo, clb_razao) VALUES (?, ?)"
-    truncate_and_insert(df, "dim_colaborador", insert_q)
+    upsert_table_com_update(df, "dim_colaborador", insert_q, "clb_codigo", ["clb_razao"])
 
 def load_dim_motdevolucao():
     df = pd.read_sql("SELECT mtd_codigo, mtd_desc FROM motdevolucao", conn_erp)
-    df_sem_motivo = pd.DataFrame([{
-        'mtd_codigo': 999999,
-        'mtd_desc': 'SEM MOTIVO'
-    }])
+    df_sem_motivo = pd.DataFrame([{'mtd_codigo': 999999, 'mtd_desc': 'SEM MOTIVO'}])
     df = pd.concat([df, df_sem_motivo], ignore_index=True).drop_duplicates(subset='mtd_codigo')
     insert_q = "INSERT INTO dim_motdevolucao (mtd_codigo, mtd_desc) VALUES (?, ?)"
-    truncate_and_insert(df, "dim_motdevolucao", insert_q)
+    upsert_table_com_update(df, "dim_motdevolucao", insert_q, "mtd_codigo", ["mtd_desc"])
 
 def load_dim_produto():
     query = """
@@ -67,7 +89,7 @@ def load_dim_produto():
     """
     df = pd.read_sql(query, conn_erp)
     insert_q = "INSERT INTO dim_produto (pro_codigo, pro_desc, pro_ativo) VALUES (?, ?, ?)"
-    truncate_and_insert(df, "dim_produto", insert_q)
+    upsert_table_com_update(df, "dim_produto", insert_q, "pro_codigo", ["pro_desc", "pro_ativo"])
 
 # ---------------------------
 # FATOS
@@ -156,6 +178,9 @@ def load_fato_itenspedido():
     cursor_dw.execute("SELECT Id_ItemPedido FROM fato_itenspedido")
     ids_dw = set(row[0] for row in cursor_dw.fetchall())
 
+    cursor_dw.execute("SELECT Id_Pedido FROM fato_pedidos")
+    pedidos_dw = set(row[0] for row in cursor_dw.fetchall())
+
     query_motivos = """
         SELECT mvd_filcodigo, mvd_spvcodigo, mvd_numero AS mvd_pednumero, mvd_procodigo, mvd_mtdcodigo
         FROM movdevolucao
@@ -171,6 +196,8 @@ def load_fato_itenspedido():
             lambda row: f"{row.Id_Pedido}{int(row.ipv_numitem):03}",
             axis=1
         )
+
+        chunk = chunk[chunk['Id_Pedido'].isin(pedidos_dw)]
         chunk = chunk[~chunk['Id_ItemPedido'].isin(ids_dw)]
 
         chunk = chunk.merge(
@@ -206,7 +233,10 @@ def load_fato_itenspedido():
         conn_dw.commit()
         print(f"fato_itenspedido: chunk de {len(chunk)} registros inserido")
 
-# Execução
+# ---------------------------
+# EXECUÇÃO
+# ---------------------------
+
 load_dim_filial()
 load_dim_atividade()
 load_dim_pessoa()
