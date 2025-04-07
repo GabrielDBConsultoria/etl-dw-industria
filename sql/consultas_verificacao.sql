@@ -1,0 +1,1 @@
+-- Exemplos de consultas úteis para validação e auditoria
