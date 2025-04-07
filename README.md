@@ -1,77 +1,119 @@
-# .gitignore
-__pycache__/
-*.pyc
-.env
-.DS_Store
-.ipynb_checkpoints
-venv/
-.idea/
-
-# requirements.txt
-pandas
-pyodbc
-
-# README.md
 # ETL DW Xodó
 
-Este repositório contém o processo completo de ETL para o Data Warehouse da empresa Xodó de Minas. 
+## 🇧🇷 Leia em Português
 
-## 📄 Sobre o Projeto
-O objetivo é extrair dados do ERP relacional (MySQL 5.6 via ODBC), transformar os dados com regras de negócio, e carregar em um DW estruturado (MySQL 8). As tabelas estão divididas entre dimensões e fatos.
+Este repositório contém o processo completo de ETL para o Data Warehouse da empresa **Xodó de Minas**, construído com MySQL. O script extrai dados do ERP relacional via ODBC, realiza transformações com regras de negócio e carrega os dados em tabelas de dimensões e fatos.
 
-## 📊 Estrutura do Projeto
+---
 
-```
+## 📁 Estrutura do Projeto
+```bash
 etl-dw-xodo/
 ├── README.md
 ├── requirements.txt
+├── etl_dw_xodo.py
 ├── .gitignore
-├── etl_dw_xodo.py               # Script principal do ETL
-├── /sql
-│   └── ddl_alter_tables.sql   # Scripts SQL para ajuste nas tabelas do DW
-└── /doc
-    └── etl_dw_documentacao.md # Documentação completa em Markdown
 ```
 
-## ⚙️ Como executar
-1. Crie os DSNs ODBC `xodo` (ERP) e `dw_xodo` (DW)
-2. Instale as dependências:
+---
+
+## 📌 Sobre o Projeto
+
+📌 **Objetivo:**
+- Extrair dados do ERP relacional (MySQL 5.6 via ODBC)
+- Transformar dados com regras de negócio
+- Carregar em DW estruturado (MySQL 8)
+
+📌 **Tecnologias:**
+- Python (pandas, pyodbc)
+- MySQL 5.6 (ERP) e MySQL 8 (DW)
+
+📌 **Tabelas criadas:**
+### 🔹 Dimensões (atualizadas completamente)
+- `dim_filial`
+- `dim_atividade`
+- `dim_pessoa`
+- `dim_colaborador`
+- `dim_motdevolucao`
+- `dim_produto`
+
+### 🔸 Fatos (atualização incremental)
+- `fato_pedidos`
+- `fato_itenspedido`
+
+---
+
+## 🧠 Regras de Negócio
+
+- `fato_pedidos` inclui apenas pedidos a partir de 2025, status 6 e determinadas naturezas de operação
+- `fato_itenspedido` relaciona itens de pedido com possíveis devoluções através do código de motivo (`mtd_codigo`)
+- Caso o item não possua motivo, será atribuído `999999 - SEM MOTIVO`
+
+---
+
+## ▶️ Execução
+
+1. Instale os pacotes:
 ```bash
 pip install -r requirements.txt
 ```
-3. Execute o script principal:
+
+2. Execute o script Python (necessário ter DSN configurado para `xodo` e `dw_xodo`):
 ```bash
 python etl_dw_xodo.py
 ```
 
-## 🔍 O que o ETL faz?
-- Atualiza todas as dimensões com `DELETE + INSERT`
-- Atualiza apenas registros novos nas tabelas fato
-- Gera chaves como `Id_Pedido` e `Id_ItemPedido`
-- Une as tabelas de devolução para compor a dimensão de motivos
+---
 
-## 🔹 Checklist de tabelas
+## 🇺🇸 English Version
 
-### Dimensões:
-- [x] `dim_filial`
-- [x] `dim_atividade`
-- [x] `dim_pessoa`
-- [x] `dim_colaborador`
-- [x] `dim_motdevolucao`
-- [x] `dim_produto`
+This repository contains the complete ETL process for the **Xodó de Minas** company's Data Warehouse, built with MySQL. The script extracts data from the ERP system via ODBC, applies business rules, and loads it into a structured Data Warehouse.
 
-### Fatos:
-- [x] `fato_pedidos`
-- [x] `fato_itenspedido`
+### 📁 Project Structure
+```bash
+etl-dw-xodo/
+├── README.md
+├── requirements.txt
+├── etl_dw_xodo.py
+├── .gitignore
+```
 
-## 📖 Documentação
-A documentação completa do projeto está no arquivo [`doc/etl_dw_documentacao.md`](doc/etl_dw_documentacao.md).
+### 📌 Project Overview
+- Extract data from relational ERP (MySQL 5.6 via ODBC)
+- Transform with business rules
+- Load into structured DW (MySQL 8)
 
-## 🚀 Futuras melhorias
-- Automatização com Apache Airflow ou agendador
-- Criação de tabela de logs de execução
-- Validação e teste de integridade com pytest
+### 📌 Technologies
+- Python (pandas, pyodbc)
+- MySQL 5.6 (ERP) and MySQL 8 (DW)
+
+### 🔹 Dimensions (fully refreshed)
+- `dim_filial`
+- `dim_atividade`
+- `dim_pessoa`
+- `dim_colaborador`
+- `dim_motdevolucao`
+- `dim_produto`
+
+### 🔸 Facts (incremental load)
+- `fato_pedidos`
+- `fato_itenspedido`
 
 ---
 
-Desenvolvido com ❤️ para a Xodó de Minas por Gabriel com apoio do ChatGPT.
+## 🧠 Business Rules
+- Only orders from 2025 onwards with status = 6 and specific nature codes are loaded into `fato_pedidos`
+- `fato_itenspedido` links items to return reasons (motives)
+- If no reason is found, `999999 - SEM MOTIVO` is assigned
+
+---
+
+## ▶️ How to Run
+```bash
+pip install -r requirements.txt
+python etl_dw_xodo.py
+```
+
+---
+
+Mantenedor: [@GabrielDBConsultoria](https://github.com/GabrielDBConsultoria) 💼
