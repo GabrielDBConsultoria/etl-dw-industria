@@ -19,7 +19,7 @@ Este documento descreve o **modelo lógico** do Data Warehouse (DW) após decidi
 
 ---
 
-## Diagrama Lógico (Mermaid)
+# Diagrama Lógico (Mermaid)
 
 ```mermaid
 erDiagram
@@ -39,7 +39,8 @@ erDiagram
         int pes_codigo PK
         string pes_razao
         string pes_fantasia
-        int pes_atvcodigo? (FK p/ dim_atividade, se existir)
+        int pes_atvcodigo FK
+        %% se quiser relacionar c/ dim_atividade
         boolean pes_ativo
         %% outros atributos ...
     }
@@ -68,7 +69,8 @@ erDiagram
         int ped_pescodigo FK
         int ped_vencodigo FK
         int ipv_ProCodigo FK
-        int ipv_mtdcodigo? (FK)
+        int ipv_mtdcodigo FK
+        %% se for nulo ou 999999, indica "sem motivo"
         string ped_natcodigo
         int ped_numero
         date ped_dtEmissao
