@@ -2,16 +2,16 @@
 
 ## 🇧🇷 Leia em Português
 
-Este repositório contém o processo completo de ETL para o Data Warehouse da empresa **Xodó de Minas**, construído com MySQL. O script extrai dados do ERP relacional via ODBC, realiza transformações com regras de negócio e carrega os dados em tabelas de dimensões e fatos.
+Este repositório contém o processo completo de ETL para o Data Warehouse da empresa XD, construído com MySQL. O script extrai dados do ERP relacional via ODBC, realiza transformações com regras de negócio e carrega os dados em tabelas de dimensões e fatos.
 
 ---
 
 ## 📁 Estrutura do Projeto
 ```bash
-etl-dw-xodo/
+etl-dw-industria/
 ├── README.md
 ├── requirements.txt
-├── etl_dw_xodo.py
+├── etl_dw_industria.py
 ├── .gitignore
 ```
 
@@ -26,7 +26,7 @@ etl-dw-xodo/
 
 📌 **Tecnologias:**
 - Python (pandas, pyodbc)
-- MySQL 5.6 (ERP) e MySQL 8 (DW)
+- MySQL 5.6 (ERP)
 
 📌 **Tabelas criadas:**
 ### 🔹 Dimensões (atualizadas completamente)
@@ -58,23 +58,23 @@ etl-dw-xodo/
 pip install -r requirements.txt
 ```
 
-2. Execute o script Python (necessário ter DSN configurado para `xodo` e `dw_xodo`):
+2. Execute o script Python (necessário ter DSN configurado para `xd` e `dw_xd`):
 ```bash
-python etl_dw_xodo.py
+python etl_dw_industria.py
 ```
 
 ---
 
 ## 🇺🇸 English Version
 
-This repository contains the complete ETL process for the **Xodó de Minas** company's Data Warehouse, built with MySQL. The script extracts data from the ERP system via ODBC, applies business rules, and loads it into a structured Data Warehouse.
+This repository contains the complete ETL process for the **XD* company's Data Warehouse, built with MySQL. The script extracts data from the ERP system via ODBC, applies business rules, and loads it into a structured Data Warehouse.
 
 ### 📁 Project Structure
 ```bash
-etl-dw-xodo/
+etl-dw-industria/
 ├── README.md
 ├── requirements.txt
-├── etl_dw_xodo.py
+├── etl_dw_xd.py
 ├── .gitignore
 ```
 
@@ -111,7 +111,7 @@ etl-dw-xodo/
 ## ▶️ How to Run
 ```bash
 pip install -r requirements.txt
-python etl_dw_xodo.py
+python etl_dw_inustria.py
 ```
 
 ---
