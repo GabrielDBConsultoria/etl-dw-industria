@@ -56,4 +56,4 @@ Ao final da carga de `fato_itenspedido`, é feita uma verificação cruzada para
 
 ---
 
-Caso precise converter para PDF ou HTML para documentação oficial, o formato Markdown é compatível com diversas ferramentas como VSCode, Typora, Obsidian e o próprio GitHub.
+
