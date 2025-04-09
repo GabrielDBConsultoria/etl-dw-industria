@@ -2,8 +2,8 @@ import pyodbc
 import pandas as pd
 
 # Conexões
-conn_erp = pyodbc.connect("DSN=xodo")
-conn_dw = pyodbc.connect("DSN=dw_xodo")
+conn_erp = pyodbc.connect("DSN=xd")
+conn_dw = pyodbc.connect("DSN=dw_xd")
 cursor_dw = conn_dw.cursor()
 
 print("\u2705 Conectado ao ERP e DW")
