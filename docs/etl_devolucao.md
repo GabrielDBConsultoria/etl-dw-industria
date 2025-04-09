@@ -1,7 +1,7 @@
 # Documentação ETL - DW 
 
 ## ✨ Objetivo
-Este processo ETL tem como objetivo extrair dados do ERP (base OLTP) e carregá-los de forma estruturada em um Data Warehouse MySQL chamado `dw_xodo`, separando corretamente as tabelas de dimensão e de fatos para análises posteriores.
+Este processo ETL tem como objetivo extrair dados do ERP (base OLTP) e carregá-los de forma estruturada em um Data Warehouse MySQL chamado `dw_xd`, separando corretamente as tabelas de dimensão e de fatos para análises posteriores.
 
 ## 📂 Estrutura Geral
 
