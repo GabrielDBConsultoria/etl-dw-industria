@@ -84,7 +84,7 @@ This repository contains the complete ETL process for the **XD* company's Data W
 ---
 
 ## 🧠 Business Rules
-- Only orders from 2025 onwards with status = 6 and specific nature codes 
+- Only orders from 2025 onwards with status = 6 and specific business operations such as sales and returns 
 - Link Order items to return reasons (motives)
 - If no reason is found, `999999 - SEM MOTIVO` is assigned
 
