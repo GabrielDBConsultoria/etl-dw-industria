@@ -1,48 +1,57 @@
 import pyodbc
 import pandas as pd
+import numpy as np
 
-# Conexões
-conn_erp = pyodbc.connect("DSN=xd")
-conn_dw = pyodbc.connect("DSN=dw_xd")
+# Conexões utilizando DSN (confira que os DSNs "xodo" e "dw_xodo" estão configurados)
+conn_erp = pyodbc.connect("DSN=xodo")
+conn_dw = pyodbc.connect("DSN=dw_xodo")
 cursor_dw = conn_dw.cursor()
 
 print("\u2705 Conectado ao ERP e DW")
 
-# Função auxiliar com UPDATE + INSERT para dimensões
+# Função auxiliar para converter valores numpy para tipos nativos do Python
+def cast_value(val):
+    if isinstance(val, (np.integer,)):
+        return int(val)
+    elif isinstance(val, (np.floating,)):
+        return float(val)
+    else:
+        return val
+
+# ------------------------------------------------
+# FUNÇÃO AUXILIAR: Upsert para as DIMENSÕES
+# ------------------------------------------------
 def upsert_table_com_update(df, table_name, insert_query, pk_column, compare_columns):
     df = df.fillna("")
     cursor_dw.execute(f"SELECT * FROM {table_name}")
     columns = [column[0] for column in cursor_dw.description]
     existing_rows = cursor_dw.fetchall()
-
     existing_dict = {
         row[columns.index(pk_column)]: dict(zip(columns, row))
         for row in existing_rows
     }
-
-    updated, inserted = 0, 0
+    updated, inserted_count = 0, 0
     for _, row in df.iterrows():
-        pk_value = row[pk_column]
+        pk_value = cast_value(row[pk_column])
         if pk_value in existing_dict:
             has_changes = any(
-                str(row[col]) != str(existing_dict[pk_value].get(col, ""))
+                str(cast_value(row[col])) != str(existing_dict[pk_value].get(col, ""))
                 for col in compare_columns
             )
             if has_changes:
                 set_clause = ", ".join([f"{col} = ?" for col in compare_columns])
                 update_query = f"UPDATE {table_name} SET {set_clause} WHERE {pk_column} = ?"
-                update_values = [row[col] for col in compare_columns] + [pk_value]
+                update_values = [cast_value(row[col]) for col in compare_columns] + [pk_value]
                 cursor_dw.execute(update_query, update_values)
                 updated += 1
         else:
-            cursor_dw.execute(insert_query, tuple(row[col] for col in [pk_column] + compare_columns))
-            inserted += 1
-
+            cursor_dw.execute(insert_query, tuple(cast_value(row[col]) for col in [pk_column] + compare_columns))
+            inserted_count += 1
     conn_dw.commit()
-    print(f"✅ {inserted} inseridos e {updated} atualizados em {table_name}")
+    print(f"✅ {inserted_count} inseridos e {updated} atualizados em {table_name}")
 
 # ---------------------------
-# DIMENSÕES
+# CARGA DAS DIMENSÕES
 # ---------------------------
 
 def load_dim_filial():
@@ -76,6 +85,7 @@ def load_dim_colaborador():
 
 def load_dim_motdevolucao():
     df = pd.read_sql("SELECT mtd_codigo, mtd_desc FROM motdevolucao", conn_erp)
+    # Adiciona linha "SEM MOTIVO" com código 999999
     df_sem_motivo = pd.DataFrame([{'mtd_codigo': 999999, 'mtd_desc': 'SEM MOTIVO'}])
     df = pd.concat([df, df_sem_motivo], ignore_index=True).drop_duplicates(subset='mtd_codigo')
     insert_q = "INSERT INTO dim_motdevolucao (mtd_codigo, mtd_desc) VALUES (?, ?)"
@@ -91,158 +101,149 @@ def load_dim_produto():
     insert_q = "INSERT INTO dim_produto (pro_codigo, pro_desc, pro_ativo) VALUES (?, ?, ?)"
     upsert_table_com_update(df, "dim_produto", insert_q, "pro_codigo", ["pro_desc", "pro_ativo"])
 
-# ---------------------------
-# FATOS
-# ---------------------------
-
-def load_fato_pedidos():
+# ----------------------------------------
+# CARGA DO FATO UNIFICADO: fato_vendasitens
+# ----------------------------------------
+def load_fato_vendasitens():
+    """
+    Carrega dados unificados a partir da tabela de itenspedido com join em pedidos
+    e left join com movdevolucao para capturar o motivo, na tabela fato_vendasitens.
+    
+    O Id_ItemPedido é calculado pela concatenação de:
+      ipv_filcodigo, ipv_spvcodigo, ipv_pednumero, ipv_procodigo
+    Assim como na movdevolucao, o identificador é gerado com a mesma lógica e, adicionalmente,
+    consideramos que ipv_numitem = mvd_numitem para o join.
+    """
+    # Recupera os Id_ItemPedido já inseridos no DW para evitar duplicação
+    cursor_dw.execute("SELECT Id_ItemPedido FROM fato_vendasitens")
+    ids_dw = {row[0] for row in cursor_dw.fetchall()}
+    
+    # Recupera os códigos válidos de motivo e produto da dimensão
+    cursor_dw.execute("SELECT mtd_codigo FROM dim_motdevolucao")
+    valid_mot_codes = {row[0] for row in cursor_dw.fetchall()}
+    cursor_dw.execute("SELECT pro_codigo FROM dim_produto")
+    valid_prod_codes = {row[0] for row in cursor_dw.fetchall()}
+    
+    # Consulta unificada
     query = """
-        SELECT
-            ped_filcodigo,
-            ped_spvcodigo,
-            ped_numero,
-            ped_pesobruto,
-            ped_valor,
-            ped_pescodigo,
-            ped_vencodigo,
-            ped_dtemissao,
-            ped_dtentrega,
-            ped_natcodigo,
-            ped_stpcodigo,
-            ped_valsubst
-        FROM pedidos
-        WHERE YEAR(ped_dtemissao) >= 2025
-          AND ped_stpcodigo = 6
-          AND ped_natcodigo IN ('VE','VTE','VIN','VTI','DEV','DTR','DV')
+    SELECT
+        CONCAT(
+            LPAD(ipv.ipv_filcodigo, 2, '0'),
+            LPAD(ipv.ipv_spvcodigo, 3, '0'),
+            LPAD(ipv.ipv_pednumero, 10, '0'),
+            LPAD(ipv.ipv_procodigo, 11, '0')
+        ) AS Id_ItemPedido,
+        ipv.ipv_filcodigo AS ped_filcodigo,
+        p.Ped_PesCodigo AS ped_pescodigo,
+        p.Ped_VenCodigo AS ped_vencodigo,
+        ipv.ipv_procodigo AS ipv_ProCodigo,
+        COALESCE(mov.mvd_mtdcodigo, 999999) AS ipv_mtdcodigo,
+        p.Ped_NatCodigo AS ped_natcodigo,
+        p.Ped_Numero AS ped_numero,
+        p.Ped_DtEmissao AS ped_dtemissao,
+        p.Ped_DtEntrega AS ped_dtEntrega,
+        ipv.ipv_quantidade AS ipv_Quantidade,
+        ipv.ipv_propbruto AS ipv_propbruto,
+        ipv.ipv_precovenda AS ipv_precovenda,
+        ipv.ipv_valsubst AS ipv_valsubst
+    FROM itenspedido ipv
+    JOIN pedidos p ON
+         ipv.ipv_filcodigo = p.Ped_FilCodigo AND
+         ipv.ipv_spvcodigo = p.Ped_SpvCodigo AND
+         ipv.ipv_pednumero = p.Ped_Numero
+    LEFT JOIN (
+         SELECT
+              CONCAT(
+                  LPAD(mvd_filcodigo, 2, '0'),
+                  LPAD(mvd_spvcodigo, 3, '0'),
+                  LPAD(mvd_numero, 10, '0'),
+                  LPAD(mvd_procodigo, 11, '0')
+              ) AS mvd_iditempedido,
+              mvd_mtdcodigo,
+              mvd_numitem
+         FROM movdevolucao
+    ) mov ON mov.mvd_iditempedido = CONCAT(
+            LPAD(ipv.ipv_filcodigo, 2, '0'),
+            LPAD(ipv.ipv_spvcodigo, 3, '0'),
+            LPAD(ipv.ipv_pednumero, 10, '0'),
+            LPAD(ipv.ipv_procodigo, 11, '0')
+    )
+    AND ipv.ipv_numitem = mov.mvd_numitem
+    WHERE YEAR(p.Ped_DtEmissao) >= 2025
+      AND p.Ped_StpCodigo = 6
+      AND p.Ped_NatCodigo IN ('VE','VTE','VIN','VTI','DEV','DTR','DV')
+    ORDER BY ipv.ipv_filcodigo, ipv.ipv_pednumero, ipv.ipv_procodigo
     """
-    cursor_dw.execute("SELECT Id_Pedido FROM fato_pedidos")
-    ids_dw = set(row[0] for row in cursor_dw.fetchall())
-
+    
+    # Ler os dados em chunks para evitar sobrecarga de memória
     for chunk in pd.read_sql(query, conn_erp, chunksize=5000):
-        chunk['Id_Pedido'] = chunk.apply(
-            lambda row: f"{int(row.ped_filcodigo):02}{str(row.ped_spvcodigo).zfill(3)}{int(row.ped_numero):010}",
-            axis=1
-        )
-        chunk = chunk[~chunk['Id_Pedido'].isin(ids_dw)]
-
-        insert_q = """
-            INSERT INTO fato_pedidos (
-                Id_Pedido, Ped_FilCodigo, Ped_SpvCodigo, Ped_Numero,
-                Ped_pesobruto, Ped_Valor, Ped_PesCodigo, Ped_VenCodigo,
-                Ped_DtEmissao, Ped_DtEntrega, Ped_NatCodigo, Ped_StpCodigo, Ped_valsubst
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        for _, row in chunk.iterrows():
-            cursor_dw.execute("DELETE FROM fato_pedidos WHERE Id_Pedido = ?", row.Id_Pedido)
-            cursor_dw.execute(insert_q, (
-                row.Id_Pedido,
-                row.ped_filcodigo,
-                row.ped_spvcodigo,
-                row.ped_numero,
-                row.ped_pesobruto or 0,
-                row.ped_valor or 0,
-                row.ped_pescodigo,
-                row.ped_vencodigo,
-                row.ped_dtemissao,
-                row.ped_dtentrega,
-                row.ped_natcodigo,
-                row.ped_stpcodigo,
-                row.ped_valsubst or 0
-            ))
-        conn_dw.commit()
-        print(f"fato_pedidos: chunk de {len(chunk)} registros inserido")
-
-def load_fato_itenspedido():
-    query = """
-        SELECT
-            ipv.ipv_filcodigo,
-            ipv.ipv_spvcodigo,
-            ipv.ipv_pednumero,
-            ipv.ipv_numitem,
-            ipv.ipv_procodigo,
-            ipv.ipv_quantidade,
-            ipv.ipv_precovenda,
-            ipv.ipv_valsubst,
-            ipv.ipv_unpunidade,
-            ipv.ipv_propbruto,
-            p.ped_dtemissao
-        FROM itenspedido ipv
-        JOIN pedidos p ON
-            ipv.ipv_filcodigo = p.ped_filcodigo AND
-            ipv.ipv_spvcodigo = p.ped_spvcodigo AND
-            ipv.ipv_pednumero = p.ped_numero
-        WHERE YEAR(p.ped_dtemissao) >= 2025
-          AND p.ped_stpcodigo = 6
-          AND p.ped_natcodigo IN ('VE','VTE','VIN','VTI','DEV','DTR','DV')
-    """
-    cursor_dw.execute("SELECT Id_ItemPedido FROM fato_itenspedido")
-    ids_dw = set(row[0] for row in cursor_dw.fetchall())
-
-    cursor_dw.execute("SELECT Id_Pedido FROM fato_pedidos")
-    pedidos_dw = set(row[0] for row in cursor_dw.fetchall())
-
-    query_motivos = """
-        SELECT mvd_filcodigo, mvd_spvcodigo, mvd_numero AS mvd_pednumero, mvd_procodigo, mvd_mtdcodigo
-        FROM movdevolucao
-    """
-    df_motivos = pd.read_sql(query_motivos, conn_erp)
-
-    for chunk in pd.read_sql(query, conn_erp, chunksize=5000):
-        chunk['Id_Pedido'] = chunk.apply(
-            lambda row: f"{int(row.ipv_filcodigo):02}{str(row.ipv_spvcodigo).zfill(3)}{int(row.ipv_pednumero):010}",
-            axis=1
-        )
-        chunk['Id_ItemPedido'] = chunk.apply(
-            lambda row: f"{row.Id_Pedido}{int(row.ipv_numitem):03}",
-            axis=1
-        )
-
-        chunk = chunk[chunk['Id_Pedido'].isin(pedidos_dw)]
+        # Filtra registros já processados
         chunk = chunk[~chunk['Id_ItemPedido'].isin(ids_dw)]
-
-        chunk = chunk.merge(
-            df_motivos,
-            how='left',
-            left_on=['ipv_filcodigo','ipv_spvcodigo','ipv_pednumero','ipv_procodigo'],
-            right_on=['mvd_filcodigo','mvd_spvcodigo','mvd_pednumero','mvd_procodigo']
-        )
-        chunk['ipv_mtdcodigo'] = chunk['mvd_mtdcodigo'].fillna(999999).astype(int)
-
-        insert_query = """
-            INSERT INTO fato_itenspedido (
-                Id_ItemPedido, Id_Pedido,
-                ipv_numitem, ipv_ProCodigo, ipv_Quantidade, ipv_precovenda,
-                ipv_valsubst, ipv_UnpUnidade, ipv_propbruto, ipv_mtdcodigo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        # Filtra registros cujo código de produto exista na dimensão
+        chunk = chunk[chunk['ipv_ProCodigo'].isin(valid_prod_codes)]
+        
+        insert_q = """
+            INSERT INTO fato_vendasitens (
+                Id_ItemPedido,
+                ped_filcodigo,
+                ped_pescodigo,
+                ped_vencodigo,
+                ipv_ProCodigo,
+                ipv_mtdcodigo,
+                ped_natcodigo,
+                ped_numero,
+                ped_dtemissao,
+                ped_dtEntrega,
+                ipv_Quantidade,
+                ipv_propbruto,
+                ipv_precovenda,
+                ipv_valsubst
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-
         for _, row in chunk.iterrows():
-            cursor_dw.execute("DELETE FROM fato_itenspedido WHERE Id_ItemPedido = ?", row.Id_ItemPedido)
-            cursor_dw.execute(insert_query, (
-                row.Id_ItemPedido,
-                row.Id_Pedido,
-                row.ipv_numitem,
-                row.ipv_procodigo,
-                row.ipv_quantidade or 0,
-                row.ipv_precovenda or 0,
-                row.ipv_valsubst or 0,
-                row.ipv_unpunidade,
+            # Verifica se o código do motivo é válido; se não, força para 999999
+            mtdcode = cast_value(row.ipv_mtdcodigo)
+            if mtdcode not in valid_mot_codes:
+                mtdcode = 999999
+            cursor_dw.execute("DELETE FROM fato_vendasitens WHERE Id_ItemPedido = ?", cast_value(row.Id_ItemPedido))
+            cursor_dw.execute(insert_q, (
+                cast_value(row.Id_ItemPedido),
+                cast_value(row.ped_filcodigo),
+                cast_value(row.ped_pescodigo),
+                cast_value(row.ped_vencodigo),
+                cast_value(row.ipv_ProCodigo),
+                mtdcode,
+                row.ped_natcodigo,
+                cast_value(row.ped_numero),
+                row.ped_dtemissao,
+                row.ped_dtEntrega,
+                row.ipv_Quantidade or 0,
                 row.ipv_propbruto or 0,
-                row.ipv_mtdcodigo
+                row.ipv_precovenda or 0,
+                row.ipv_valsubst or 0
             ))
         conn_dw.commit()
-        print(f"fato_itenspedido: chunk de {len(chunk)} registros inserido")
+        print(f"fato_vendasitens: chunk de {len(chunk)} registros inserido")
+        for id_item in chunk['Id_ItemPedido']:
+            ids_dw.add(id_item)
 
 # ---------------------------
-# EXECUÇÃO
+# EXECUÇÃO FINAL DO ETL
 # ---------------------------
+def main():
+    # Carrega as dimensões
+    load_dim_filial()
+    load_dim_atividade()
+    load_dim_pessoa()
+    load_dim_colaborador()
+    load_dim_motdevolucao()
+    load_dim_produto()
+    
+    # Carrega o fato unificado
+    load_fato_vendasitens()
+    
+    print("✅ ETL concluído com sucesso!")
 
-load_dim_filial()
-load_dim_atividade()
-load_dim_pessoa()
-load_dim_colaborador()
-load_dim_motdevolucao()
-load_dim_produto()
-
-load_fato_pedidos()
-load_fato_itenspedido()
+if __name__ == "__main__":
+    main()
