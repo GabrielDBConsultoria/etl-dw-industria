@@ -1,7 +1,7 @@
 # ETL Documentation - DW (Unified Model)
 
 ✨ **Objective**  
-This ETL process extracts data from the ERP (OLTP base) and loads it in a structured manner into a MySQL Data Warehouse called **dw_xodo**. The main change in this project is the unification of the fact tables into a single table, **fato_vendasitens**, which consolidates the header (order) and item data for subsequent analyses, thereby adopting a Star Schema model for our data warehouse.
+This ETL process extracts data from the ERP (OLTP base) and loads it in a structured manner into a MySQL Data Warehouse called **dw_xd**. The main change in this project is the unification of the fact tables into a single table, **fato_vendasitens**, which consolidates the header (order) and item data for subsequent analyses, thereby adopting a Star Schema model for our data warehouse.
 
 ---
 
