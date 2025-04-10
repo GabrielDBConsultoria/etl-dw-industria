@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 
 # Conexões utilizando DSN (confira que os DSNs "xodo" e "dw_xodo" estão configurados)
-conn_erp = pyodbc.connect("DSN=xodo")
-conn_dw = pyodbc.connect("DSN=dw_xodo")
+conn_erp = pyodbc.connect("DSN=xd")
+conn_dw = pyodbc.connect("DSN=dw_xd")
 cursor_dw = conn_dw.cursor()
 
 print("\u2705 Conectado ao ERP e DW")
